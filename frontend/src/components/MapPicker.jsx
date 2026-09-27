@@ -1,366 +1,268 @@
-import React, { useState } from 'react';
-import { 
-  MapPin, 
-  Navigation, 
-  ExternalLink, 
-  Layers, 
-  LocateFixed, 
-  Info,
-  CheckCircle2
-} from 'lucide-react';
+import React, { useState, useCallback, useRef } from 'react';
+import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
+import { Navigation, MapPin, ExternalLink, LocateFixed } from 'lucide-react';
 
-export default function MapPicker({ 
-  latitude, 
-  longitude, 
-  onChangeLocation, 
+const MAP_LIBRARIES = ['places'];
+
+const containerStyle = {
+  width: '100%',
+  height: '360px',
+  borderRadius: '0 0 var(--radius-lg) var(--radius-lg)',
+};
+
+const DEFAULT_CENTER = { lat: 28.6139, lng: 77.2090 }; // New Delhi
+
+export default function MapPicker({
+  latitude,
+  longitude,
+  onChangeLocation,
   wardName,
   readOnly = false,
-  hotspots = [] 
 }) {
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: apiKey || '',
+    libraries: MAP_LIBRARIES,
+  });
+
   const [gpsLoading, setGpsLoading] = useState(false);
-  const [gpsError, setGpsError] = useState(null);
+  const [gpsError, setGpsError]   = useState(null);
   const [gpsSuccess, setGpsSuccess] = useState(false);
+  const [address, setAddress]     = useState('');
+  const mapRef = useRef(null);
 
-  // SVG coordinate system mapping:
-  // City grid covers:
-  // Lat: 37.730 to 37.820 (height ~ 0.09)
-  // Lng: -122.470 to -122.370 (width ~ 0.10)
-  const minLat = 37.730;
-  const maxLat = 37.820;
-  const minLng = -122.470;
-  const maxLng = -122.370;
+  const center = (latitude && longitude)
+    ? { lat: latitude, lng: longitude }
+    : DEFAULT_CENTER;
 
-  const width = 600;
-  const height = 360;
+  // Reverse geocode to get a human-readable address
+  const reverseGeocode = useCallback((lat, lng) => {
+    if (!window.google) return;
+    const geocoder = new window.google.maps.Geocoder();
+    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+      if (status === 'OK' && results[0]) {
+        setAddress(results[0].formatted_address);
+      }
+    });
+  }, []);
 
-  // Convert lat/lng to SVG X/Y
-  const getX = (lng) => Math.max(20, Math.min(width - 20, ((lng - minLng) / (maxLng - minLng)) * width));
-  const getY = (lat) => Math.max(20, Math.min(height - 20, (1 - (lat - minLat) / (maxLat - minLat)) * height));
-
-  // Convert SVG X/Y back to lat/lng on click
-  const handleMapClick = (e) => {
+  // Called when user drags/clicks on map
+  const handleMapClick = useCallback((e) => {
     if (readOnly) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const clickedLng = minLng + (x / rect.width) * (maxLng - minLng);
-    const clickedLat = minLat + (1 - (y / rect.height)) * (maxLat - minLat);
-
-    onChangeLocation(
-      Number(clickedLat.toFixed(5)),
-      Number(clickedLng.toFixed(5))
-    );
+    const lat = e.latLng.lat();
+    const lng = e.latLng.lng();
+    onChangeLocation(Number(lat.toFixed(6)), Number(lng.toFixed(6)));
+    reverseGeocode(lat, lng);
     setGpsSuccess(false);
-  };
+  }, [readOnly, onChangeLocation, reverseGeocode]);
 
-  // Browser Geolocation API
-  const handleUseRealGps = () => {
+  // Marker drag end
+  const handleMarkerDrag = useCallback((e) => {
+    if (readOnly) return;
+    const lat = e.latLng.lat();
+    const lng = e.latLng.lng();
+    onChangeLocation(Number(lat.toFixed(6)), Number(lng.toFixed(6)));
+    reverseGeocode(lat, lng);
+  }, [readOnly, onChangeLocation, reverseGeocode]);
+
+  // 1-tap GPS detect
+  const handleUseGps = useCallback(() => {
     if (!navigator.geolocation) {
-      setGpsError("Geolocation is not supported by your browser");
+      setGpsError('Geolocation is not supported by your browser.');
       return;
     }
-
     setGpsLoading(true);
     setGpsError(null);
-
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
         setGpsLoading(false);
-        const { latitude: lat, longitude: lng } = pos.coords;
-        onChangeLocation(
-          Number(lat.toFixed(5)),
-          Number(lng.toFixed(5))
-        );
         setGpsSuccess(true);
-        setTimeout(() => setGpsSuccess(false), 4000);
+        onChangeLocation(lat, lng);
+        reverseGeocode(lat, lng);
+        // Pan map to user's location
+        if (mapRef.current) {
+          mapRef.current.panTo({ lat, lng });
+          mapRef.current.setZoom(16);
+        }
+        setTimeout(() => setGpsSuccess(false), 5000);
       },
       (err) => {
         setGpsLoading(false);
-        setGpsError(err.message || "Failed to acquire GPS location. Using default city pin.");
+        setGpsError(
+          err.code === 1
+            ? 'Location permission denied. Please allow location access in your browser settings.'
+            : 'Failed to detect GPS. Please tap on the map to pin your location.'
+        );
       },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
-  };
-
-  const currentX = getX(longitude);
-  const currentY = getY(latitude);
+  }, [onChangeLocation, reverseGeocode]);
 
   const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
-  return (
-    <div style={{
-      background: '#FFFFFF',
-      borderRadius: 'var(--radius-lg)',
-      border: '1.5px solid var(--border-light)',
-      overflow: 'hidden',
-      boxShadow: 'var(--shadow-sm)'
-    }}>
-      {/* Top Map Action Toolbar */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0.75rem 1rem',
-        background: '#F8FAFC',
-        borderBottom: '1px solid var(--border-light)',
-        flexWrap: 'wrap',
-        gap: '0.65rem'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div style={{
-            background: '#EFF6FF',
-            padding: '0.35rem',
-            borderRadius: '8px',
-            color: '#2563EB',
-            display: 'flex',
-            alignItems: 'center'
-          }}>
-            <MapPin size={18} />
-          </div>
-          <div>
-            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-              Interactive Stylized City Map
-            </div>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-              {readOnly ? 'Click dots to view issues' : 'Click anywhere on grid to drop pin or use device GPS'}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {!readOnly && (
-            <button
-              type="button"
-              onClick={handleUseRealGps}
-              disabled={gpsLoading}
-              className="btn-secondary"
-              style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}
-            >
-              <Navigation size={14} className={gpsLoading ? "animate-spin" : ""} color="#2563EB" />
-              {gpsLoading ? 'Acquiring GPS...' : 'Use My Real Location'}
-            </button>
-          )}
-
-          <a
-            href={googleMapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.45rem 0.85rem',
-              borderRadius: 'var(--radius-md)',
-              background: '#EFF6FF',
-              color: '#1D4ED8',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              textDecoration: 'none',
-              border: '1px solid #BFDBFE'
-            }}
-            title="Open exact coordinate in external Google Maps"
-          >
-            <ExternalLink size={14} />
-            Open in Google Maps
-          </a>
-        </div>
-      </div>
-
-      {/* GPS Status feedback message */}
-      {gpsSuccess && (
-        <div style={{
-          background: '#ECFDF5',
-          borderBottom: '1px solid #A7F3D0',
-          padding: '0.4rem 1rem',
-          fontSize: '0.75rem',
-          color: '#059669',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.4rem',
-          fontWeight: 600
-        }}>
-          <CheckCircle2 size={14} />
-          Real device GPS coordinates locked successfully!
-        </div>
-      )}
-
-      {gpsError && (
-        <div style={{
-          background: '#FEF2F2',
-          borderBottom: '1px solid #FECACA',
-          padding: '0.4rem 1rem',
-          fontSize: '0.75rem',
-          color: '#DC2626',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.4rem'
-        }}>
-          <Info size={14} />
-          {gpsError}
-        </div>
-      )}
-
-      {/* Stylized SVG Interactive City Map */}
-      <div 
-        onClick={handleMapClick}
-        style={{
-          position: 'relative',
-          width: '100%',
-          height: '280px',
-          background: '#F1F5F9',
-          cursor: readOnly ? 'default' : 'crosshair',
-          overflow: 'hidden'
-        }}
-      >
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          style={{ width: '100%', height: '100%', display: 'block' }}
+  // No API key configured
+  if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
+    return (
+      <div style={{ border: '1.5px solid var(--border-light)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+        {/* GPS button — works without map */}
+        <button
+          onClick={handleUseGps}
+          disabled={gpsLoading}
+          style={{
+            width: '100%', padding: '0.85rem', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', gap: '0.5rem', background: gpsSuccess ? '#16A34A' : '#2563EB',
+            color: '#fff', fontWeight: 700, fontSize: '0.95rem', border: 'none', cursor: 'pointer',
+          }}
         >
-          {/* Base Urban Background */}
-          <rect width={width} height={height} fill="#F8FAFC" />
+          <LocateFixed size={18} />
+          {gpsLoading ? 'Detecting GPS…' : gpsSuccess ? '✅ Location Captured!' : '📍 Detect My Current Location (1-Tap GPS)'}
+        </button>
 
-          {/* Bay & Waterway */}
-          <path
-            d="M 0 0 L 600 0 L 600 70 C 450 65, 360 85, 240 70 C 120 55, 60 90, 0 80 Z"
-            fill="#E0F2FE"
-            stroke="#BAE6FD"
-            strokeWidth="1.5"
-          />
-          <text x="320" y="45" fill="#0284C7" fontSize="11" fontWeight="700" opacity="0.6">
-            NORTH MARINA BAY
-          </text>
-
-          {/* Urban Parks */}
-          <rect x="50" y="160" width="130" height="90" rx="10" fill="#DCFCE7" stroke="#BBF7D0" strokeWidth="1" />
-          <text x="75" y="210" fill="#15803D" fontSize="10" fontWeight="700" opacity="0.7">
-            GREEN VALLEY PARK
-          </text>
-
-          <rect x="380" y="190" width="120" height="70" rx="8" fill="#F1F5F9" stroke="#E2E8F0" strokeWidth="1" />
-          <text x="400" y="230" fill="#64748B" fontSize="10" fontWeight="700" opacity="0.6">
-            TECH CORRIDOR
-          </text>
-
-          {/* City Grid Roads & Boulevards */}
-          <g stroke="#E2E8F0" strokeWidth="3">
-            <line x1="0" y1="120" x2="600" y2="120" />
-            <line x1="0" y1="180" x2="600" y2="180" />
-            <line x1="0" y1="260" x2="600" y2="260" />
-            <line x1="0" y1="310" x2="600" y2="310" />
-
-            <line x1="120" y1="0" x2="120" y2="360" />
-            <line x1="220" y1="0" x2="220" y2="360" />
-            <line x1="340" y1="0" x2="340" y2="360" />
-            <line x1="460" y1="0" x2="460" y2="360" />
-          </g>
-
-          {/* Highway Artery */}
-          <path
-            d="M 0 290 Q 250 240, 600 300"
-            fill="none"
-            stroke="#CBD5E1"
-            strokeWidth="5"
-            strokeDasharray="8 4"
-          />
-          <text x="250" y="280" fill="#64748B" fontSize="9" fontWeight="600">
-            METRO EXPRESSWAY 101
-          </text>
-
-          {/* Ward Boundary Labels */}
-          <text x="240" y="150" fill="#475569" fontSize="11" fontWeight="800" opacity="0.45">
-            DOWNTOWN CENTRAL
-          </text>
-          <text x="70" y="110" fill="#475569" fontSize="10" fontWeight="700" opacity="0.4">
-            HARBOR & MARINA
-          </text>
-          <text x="240" y="340" fill="#475569" fontSize="10" fontWeight="700" opacity="0.4">
-            INDUSTRIAL HUB
-          </text>
-
-          {/* Hotspot Points (Admin or Officer Mode) */}
-          {hotspots.map((pt, idx) => {
-            const hx = getX(pt.longitude);
-            const hy = getY(pt.latitude);
-            
-            let dotColor = '#10B981'; // green
-            if (pt.color === 'red' || pt.priority_level === 'HIGH') dotColor = '#EF4444';
-            else if (pt.color === 'amber' || pt.priority_level === 'MEDIUM') dotColor = '#F59E0B';
-
-            return (
-              <g key={pt.id || idx} style={{ cursor: 'pointer' }}>
-                <circle cx={hx} cy={hy} r="7" fill={dotColor} opacity="0.25" className="pulse-badge" />
-                <circle cx={hx} cy={hy} r="4" fill={dotColor} stroke="#FFFFFF" strokeWidth="1.5" />
-              </g>
-            );
-          })}
-
-          {/* Active Reporter Dropped Pin */}
-          <g transform={`translate(${currentX}, ${currentY})`}>
-            {/* Animated Ripple */}
-            <circle cx="0" cy="0" r="16" fill="#3B82F6" opacity="0.2" className="pulse-badge" />
-            
-            {/* Pin body */}
-            <path
-              d="M 0 0 C -9 -14 -9 -28 0 -28 C 9 -28 9 -14 0 0 Z"
-              fill="#2563EB"
-              stroke="#FFFFFF"
-              strokeWidth="2"
-              filter="drop-shadow(0px 3px 4px rgba(0,0,0,0.25))"
-            />
-            {/* Pin center white dot */}
-            <circle cx="0" cy="-18" r="4" fill="#FFFFFF" />
-          </g>
-        </svg>
-
-        {/* Floating Coordinates Tooltip */}
-        <div style={{
-          position: 'absolute',
-          bottom: '10px',
-          left: '12px',
-          background: 'rgba(255, 255, 255, 0.95)',
-          padding: '0.35rem 0.65rem',
-          borderRadius: '8px',
-          border: '1px solid var(--border-light)',
-          fontSize: '0.72rem',
-          boxShadow: 'var(--shadow-sm)',
-          pointerEvents: 'none',
-          display: 'flex',
-          gap: '0.75rem',
-          fontFamily: 'var(--font-mono)'
-        }}>
-          <div>
-            <span style={{ color: 'var(--text-muted)' }}>Lat: </span>
-            <strong>{latitude.toFixed(5)}</strong>
-          </div>
-          <div>
-            <span style={{ color: 'var(--text-muted)' }}>Lng: </span>
-            <strong>{longitude.toFixed(5)}</strong>
-          </div>
-          {wardName && (
-            <div style={{ color: '#2563EB', fontWeight: 700 }}>
-              📍 {wardName}
-            </div>
+        <div style={{ background: '#FFF7ED', border: '1px solid #FDE68A', padding: '1.25rem', textAlign: 'center' }}>
+          <p style={{ fontWeight: 700, color: '#B45309', marginBottom: '0.5rem' }}>⚠️ Google Maps API Key Required</p>
+          <p style={{ fontSize: '0.85rem', color: '#78350F', lineHeight: 1.5 }}>
+            Add your key to <code style={{ background: '#FEF3C7', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>frontend/.env</code>:<br />
+            <code style={{ fontSize: '0.8rem', color: '#92400E' }}>VITE_GOOGLE_MAPS_API_KEY=your_key_here</code>
+          </p>
+          {latitude && longitude && (
+            <p style={{ marginTop: '0.75rem', fontSize: '0.82rem', color: '#6B7280' }}>
+              📍 GPS Captured: <strong>{latitude}°N, {longitude}°E</strong>
+              {' · '}
+              <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#2563EB' }}>
+                View on Google Maps ↗
+              </a>
+            </p>
           )}
         </div>
 
-        {!readOnly && (
-          <div style={{
-            position: 'absolute',
-            top: '10px',
-            right: '12px',
-            background: 'rgba(255, 255, 255, 0.92)',
-            padding: '0.3rem 0.6rem',
-            borderRadius: '6px',
-            border: '1px solid var(--border-light)',
-            fontSize: '0.7rem',
-            color: 'var(--text-muted)',
-            pointerEvents: 'none'
-          }}>
-            📍 Click map to reposition pin
+        {gpsError && (
+          <div style={{ padding: '0.75rem 1rem', background: '#FEF2F2', borderTop: '1px solid #FECACA', fontSize: '0.83rem', color: '#DC2626' }}>
+            ⚠️ {gpsError}
           </div>
         )}
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ padding: '1.5rem', textAlign: 'center', color: '#DC2626', background: '#FEF2F2', borderRadius: 'var(--radius-lg)' }}>
+        ❌ Failed to load Google Maps. Check your API key.
+      </div>
+    );
+  }
+
+  if (!isLoaded) {
+    return (
+      <div style={{ height: '360px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC', borderRadius: 'var(--radius-lg)', border: '1.5px solid var(--border-light)' }}>
+        <div style={{ textAlign: 'center', color: '#6B7280' }}>
+          <div style={{ width: '32px', height: '32px', border: '3px solid #E5E7EB', borderTop: '3px solid #2563EB', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 0.75rem' }} />
+          Loading Google Maps…
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ border: '1.5px solid var(--border-light)', borderRadius: 'var(--radius-lg)', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
+      {/* Toolbar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0.6rem 1rem', background: '#fff', borderBottom: '1px solid var(--border-light)',
+        flexWrap: 'wrap', gap: '0.5rem',
+      }}>
+        {/* GPS Button */}
+        <button
+          onClick={handleUseGps}
+          disabled={gpsLoading || readOnly}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: '0.45rem',
+            background: gpsSuccess ? '#16A34A' : '#2563EB',
+            color: '#fff', border: 'none', borderRadius: '8px',
+            padding: '0.5rem 1rem', fontWeight: 700, fontSize: '0.85rem',
+            cursor: readOnly ? 'not-allowed' : 'pointer',
+            opacity: gpsLoading ? 0.75 : 1,
+            transition: 'background 0.2s ease',
+          }}
+        >
+          <LocateFixed size={15} />
+          {gpsLoading
+            ? 'Detecting GPS…'
+            : gpsSuccess
+            ? '✅ Location Locked!'
+            : '📍 Use My GPS Location'}
+        </button>
+
+        {/* Right: coords + GMaps link */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.78rem', color: '#6B7280' }}>
+          {latitude && longitude && (
+            <>
+              <span style={{ fontFamily: 'var(--font-mono)' }}>
+                {latitude.toFixed(5)}°N, {longitude.toFixed(5)}°E
+              </span>
+              <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: '#2563EB', fontWeight: 600 }}>
+                <ExternalLink size={12} /> Google Maps
+              </a>
+            </>
+          )}
+          {!readOnly && (
+            <span style={{ color: '#9CA3AF', fontSize: '0.74rem' }}>
+              🖱 Click or drag pin to adjust
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Google Map */}
+      <GoogleMap
+        mapContainerStyle={containerStyle}
+        center={center}
+        zoom={latitude && longitude ? 15 : 12}
+        onClick={handleMapClick}
+        onLoad={(map) => { mapRef.current = map; }}
+        options={{
+          streetViewControl: false,
+          mapTypeControl: false,
+          fullscreenControl: true,
+          zoomControl: true,
+          gestureHandling: 'cooperative',
+          styles: [
+            { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+          ],
+        }}
+      >
+        {latitude && longitude && (
+          <Marker
+            position={{ lat: latitude, lng: longitude }}
+            draggable={!readOnly}
+            onDragEnd={handleMarkerDrag}
+            animation={window.google?.maps?.Animation?.DROP}
+          />
+        )}
+      </GoogleMap>
+
+      {/* Address / status bar */}
+      <div style={{ padding: '0.55rem 1rem', background: '#F8FAFC', borderTop: '1px solid var(--border-light)', fontSize: '0.8rem', color: '#374151', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <MapPin size={13} color="#DC2626" />
+        {address
+          ? address
+          : wardName
+          ? wardName
+          : latitude && longitude
+          ? `${latitude.toFixed(5)}°N, ${longitude.toFixed(5)}°E`
+          : 'Pin not placed yet'}
+      </div>
+
+      {/* GPS error */}
+      {gpsError && (
+        <div style={{ padding: '0.65rem 1rem', background: '#FEF2F2', borderTop: '1px solid #FECACA', fontSize: '0.82rem', color: '#DC2626', display: 'flex', alignItems: 'flex-start', gap: '0.45rem' }}>
+          ⚠️ {gpsError}
+        </div>
+      )}
     </div>
   );
 }

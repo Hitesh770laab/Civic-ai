@@ -296,10 +296,17 @@ export async function createReport(payload) {
     issue_type: payload.issue_type,
     title: payload.description ? payload.description.slice(0, 45) : `${payload.issue_type.replace('_', ' ')} report`,
     description: payload.description || `Reported ${payload.issue_type.replace('_', ' ')}`,
-    latitude: payload.latitude || 37.7842,
-    longitude: payload.longitude || -122.4071,
-    ward_id: payload.latitude > 37.795 ? 'w-harbor' : payload.longitude < -122.43 ? 'w-park' : 'w-downtown',
-    ward_name: payload.latitude > 37.795 ? 'Harbor & Marina' : payload.longitude < -122.43 ? 'Park Heights' : 'Downtown Central',
+    latitude: payload.latitude || 28.6139,
+    longitude: payload.longitude || 77.2090,
+    ward_id: payload.latitude > 28.5 && payload.longitude > 76.5 ? 'w-delhi' :
+              payload.latitude > 18.8 && payload.latitude < 19.3 ? 'w-mumbai' :
+              payload.latitude > 12.8 && payload.latitude < 13.1 ? 'w-bengaluru' :
+              payload.latitude > 22.4 && payload.latitude < 22.7 ? 'w-kolkata' : 'w-local',
+    ward_name: payload.latitude > 28.5 && payload.longitude > 76.5 && payload.longitude < 78.5 ? 'Delhi NCR Zone' :
+               payload.latitude > 18.8 && payload.latitude < 19.3 ? 'Mumbai District' :
+               payload.latitude > 12.8 && payload.latitude < 13.1 ? 'Bengaluru Zone' :
+               payload.latitude > 22.4 && payload.latitude < 22.7 ? 'Kolkata District' :
+               `Zone ${(payload.latitude || 28.6).toFixed(1)}°N`,
     address_hint: payload.address_hint || 'City Location',
     status: "NEW",
     priority_score: ai.final_score,

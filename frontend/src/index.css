@@ -19,31 +19,62 @@
   --text-muted: #6B7280;
   --text-dim: #9CA3AF;
 
-  /* Brand Blue */
-  --civic-50: #EFF6FF;
+  /* Brand Civic Palette — new tokens */
+  --civic-dark: #0B0F19;
+  --civic-navy: #0F172A;
+  --civic-slate: #1E293B;
+  --civic-blue: #2563EB;
+  --civic-cyan: #0EA5E9;
+  --civic-emerald: #10B981;
+  --civic-teal: #0D9488;
+  --civic-amber: #F59E0B;
+  --civic-saffron: #EA580C;
+  --civic-indigo: #4F46E5;
+
+  /* ── Legacy color scale (keep — buttons/badges/status still use these) ── */
+  /* Brand Blue scale */
+  --civic-50:  #EFF6FF;
   --civic-100: #DBEAFE;
   --civic-500: #3B82F6;
   --civic-600: #2563EB;
   --civic-700: #1D4ED8;
 
-  /* Priority Colors */
-  --red-50: #FEF2F2;   --red-100: #FEE2E2;   --red-500: #EF4444;  --red-600: #DC2626;  --red-700: #B91C1C;
+  /* Priority / Status Colors */
+  --red-50:  #FEF2F2; --red-100:  #FEE2E2; --red-500:  #EF4444; --red-600:  #DC2626; --red-700:  #B91C1C;
   --amber-50: #FFFBEB; --amber-100: #FEF3C7; --amber-500: #F59E0B; --amber-600: #D97706; --amber-700: #B45309;
   --green-50: #F0FDF4; --green-100: #DCFCE7; --green-500: #22C55E; --green-600: #16A34A; --green-700: #15803D;
   --violet-50: #F5F3FF; --violet-100: #EDE9FE; --violet-600: #7C3AED;
 
-  /* Shadows */
-  --shadow-xs: 0 1px 2px rgba(0,0,0,0.05);
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -1px rgba(0,0,0,0.05);
-  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -2px rgba(0,0,0,0.04);
-  --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.08), 0 10px 10px -5px rgba(0,0,0,0.03);
-  --shadow-blue: 0 4px 14px rgba(37,99,235,0.18);
+  /* Glassmorphism & Surface */
+  --glass-white: rgba(255, 255, 255, 0.85);
+  --glass-card:  rgba(255, 255, 255, 0.92);
+  --glass-border: rgba(226, 232, 240, 0.8);
+  --glass-dark:  rgba(15, 23, 42, 0.85);
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
+  /* Gradients */
+  --grad-civic:   linear-gradient(135deg, #0EA5E9 0%, #2563EB 50%, #4F46E5 100%);
+  --grad-hero:    linear-gradient(145deg, #0B0F19 0%, #0F172A 50%, #1E1B4B 100%);
+  --grad-emerald: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  --grad-amber:   linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  --grad-surface: linear-gradient(180deg, #F8FAFC 0%, #EFF6FF 100%);
+
+  /* Shadows */
+  --shadow-xs:   0 1px 2px rgba(0,0,0,0.05);
+  --shadow-sm:   0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md:   0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -1px rgba(0,0,0,0.05);
+  --shadow-lg:   0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -2px rgba(0,0,0,0.04);
+  --shadow-xl:   0 20px 25px -5px rgba(0,0,0,0.08), 0 10px 10px -5px rgba(0,0,0,0.03);
+  --shadow-blue: 0 4px 14px rgba(37,99,235,0.18);
+  --shadow-glow-blue:    0 0 25px rgba(37, 99, 235, 0.2);
+  --shadow-glow-cyan:    0 0 25px rgba(14, 165, 233, 0.25);
+  --shadow-glow-emerald: 0 0 25px rgba(16, 185, 129, 0.2);
+  --shadow-card:         0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 2px 6px -1px rgba(15, 23, 42, 0.03);
+  --shadow-card-hover:   0 12px 30px -4px rgba(15, 23, 42, 0.12), 0 4px 10px -2px rgba(15, 23, 42, 0.05);
+
+  --radius-sm:   6px;
+  --radius-md:   10px;
+  --radius-lg:   14px;
+  --radius-xl:   20px;
   --radius-full: 9999px;
 }
 

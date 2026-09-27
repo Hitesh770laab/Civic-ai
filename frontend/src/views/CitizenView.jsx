@@ -10,6 +10,8 @@ import PipelineStrip from '../components/PipelineStrip';
 import AiExplainDrawer from '../components/AiExplainDrawer';
 import { createReport, classifyTextPreview, runYoloDetection } from '../services/api';
 import { playSound, speakText, stopSpeaking, createSpeechRecognizer } from '../services/voiceAssistant';
+import { GoogleMap, useJsApiLoader, Marker } from '@react-google-maps/api';
+
 
 /* ── Multilingual dictionary for voice & labels ─────────── */
 const TRANSLATIONS = {
@@ -237,52 +239,73 @@ const SAMPLE_PRESETS = [
 /* ── Interactive Map Component with Big Visuals ─────────── */
 function MiniMap({ lat, lng, wardName, onChangeLocation, lang = 'en', onGpsSuccess }) {
   const [gpsLoading, setGpsLoading] = useState(false);
-  const [gpsStatus, setGpsStatus] = useState(null);
+  const [gpsStatus, setGpsStatus]   = useState(null); // 'ok' | 'error' | null
+  const [address, setAddress]       = useState('');
+  const mapRef = useRef(null);
 
-  const minLat = 37.73, maxLat = 37.82, minLng = -122.47, maxLng = -122.37;
-  const W = 600, H = 320;
-  const getX = (l) => Math.max(12, Math.min(W - 12, ((l - minLng) / (maxLng - minLng)) * W));
-  const getY = (lt) => Math.max(12, Math.min(H - 12, (1 - (lt - minLat) / (maxLat - minLat)) * H));
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const { isLoaded } = useJsApiLoader({
+    googleMapsApiKey: apiKey || '',
+    libraries: ['places'],
+  });
 
-  const handleClick = (e) => {
+  const center = (lat && lng) ? { lat, lng } : { lat: 28.6139, lng: 77.2090 };
+  const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+
+  // Reverse geocode to get address string
+  const reverseGeocode = (lt, ln) => {
+    if (!window.google) return;
+    new window.google.maps.Geocoder().geocode({ location: { lat: lt, lng: ln } }, (results, status) => {
+      if (status === 'OK' && results[0]) setAddress(results[0].formatted_address);
+    });
+  };
+
+  const handleMapClick = (e) => {
     playSound('click');
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickedLng = minLng + ((e.clientX - rect.left) / rect.width) * (maxLng - minLng);
-    const clickedLat = minLat + (1 - (e.clientY - rect.top) / rect.height) * (maxLat - minLat);
-    onChangeLocation?.(+clickedLat.toFixed(5), +clickedLng.toFixed(5));
+    const lt = +e.latLng.lat().toFixed(6);
+    const ln = +e.latLng.lng().toFixed(6);
+    onChangeLocation?.(lt, ln);
+    reverseGeocode(lt, ln);
     setGpsStatus(null);
+  };
+
+  const handleMarkerDrag = (e) => {
+    const lt = +e.latLng.lat().toFixed(6);
+    const ln = +e.latLng.lng().toFixed(6);
+    onChangeLocation?.(lt, ln);
+    reverseGeocode(lt, ln);
   };
 
   const handleGps = () => {
     playSound('select');
-    if (!navigator.geolocation) {
-      setGpsStatus('error');
-      return;
-    }
+    if (!navigator.geolocation) { setGpsStatus('error'); return; }
     setGpsLoading(true);
     navigator.geolocation.getCurrentPosition(
       ({ coords }) => {
+        const lt = +coords.latitude.toFixed(6);
+        const ln = +coords.longitude.toFixed(6);
         setGpsLoading(false);
-        onChangeLocation?.(+coords.latitude.toFixed(5), +coords.longitude.toFixed(5));
         setGpsStatus('ok');
+        onChangeLocation?.(lt, ln);
+        reverseGeocode(lt, ln);
         playSound('success');
         onGpsSuccess?.();
+        if (mapRef.current) { mapRef.current.panTo({ lat: lt, lng: ln }); mapRef.current.setZoom(16); }
         setTimeout(() => setGpsStatus(null), 4000);
       },
-      () => {
+      (err) => {
         setGpsLoading(false);
         setGpsStatus('error');
       },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 
-  const cx = getX(lng), cy = getY(lat);
-  const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+  const noKeyFallback = !apiKey || apiKey === 'YOUR_API_KEY_HERE';
 
   return (
     <div style={{ border: '2px solid #E5E7EB', borderRadius: '16px', overflow: 'hidden', background: '#fff', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
-      {/* Prominent One-Tap GPS Button */}
+      {/* GPS Button */}
       <div style={{ padding: '0.85rem 1rem', background: '#F0FDF4', borderBottom: '1.5px solid #BBF7D0' }}>
         <button
           type="button"
@@ -290,102 +313,101 @@ function MiniMap({ lat, lng, wardName, onChangeLocation, lang = 'en', onGpsSucce
           disabled={gpsLoading}
           className="pulsing-gps"
           style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '0.6rem',
-            padding: '0.8rem 1.25rem',
-            background: '#16A34A',
-            color: '#FFFFFF',
-            borderRadius: '12px',
-            fontSize: '0.95rem',
-            fontWeight: 800,
-            boxShadow: '0 3px 10px rgba(22,163,74,0.3)',
-            cursor: 'pointer',
+            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: '0.6rem', padding: '0.8rem 1.25rem',
+            background: gpsStatus === 'ok' ? '#16A34A' : '#16A34A',
+            color: '#FFFFFF', borderRadius: '12px', fontSize: '0.95rem',
+            fontWeight: 800, boxShadow: '0 3px 10px rgba(22,163,74,0.3)', cursor: 'pointer',
           }}
         >
           <Navigation size={18} className={gpsLoading ? 'animate-spin' : ''} />
           {gpsLoading
-            ? (lang === 'hi' ? 'स्थान खोज रहे हैं…' : lang === 'es' ? 'Buscando GPS…' : 'Detecting GPS Location…')
-            : (lang === 'hi' ? '📍 मेरा स्थान अपने आप खोजें (GPS)' : lang === 'es' ? '📍 Detectar Mi Ubicación con GPS' : '📍 Detect My Current Location (1-Tap GPS)')
-          }
+            ? (lang === 'hi' ? 'स्थान खोज रहे हैं…' : 'Detecting GPS Location…')
+            : gpsStatus === 'ok'
+            ? '✅ Location Locked!'
+            : (lang === 'hi' ? '📍 मेरा स्थान अपने आप खोजें (GPS)' : '📍 Detect My Current Location (1-Tap GPS)')}
         </button>
       </div>
 
-      {/* GPS Status feedback */}
+      {/* GPS Status */}
       {gpsStatus === 'ok' && (
         <div style={{ background: '#DCFCE7', padding: '0.5rem 1rem', fontSize: '0.85rem', color: '#14532D', fontWeight: 700, display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <CheckCircle2 size={16} color="#16A34A" />
-          {lang === 'hi' ? 'स्थान सफलतापूर्वक लॉक हो गया!' : lang === 'es' ? '¡Ubicación fijada con éxito!' : 'GPS location locked successfully!'}
+          {lang === 'hi' ? 'स्थान सफलतापूर्वक लॉक हो गया!' : 'GPS location locked! You can also drag the pin to adjust.'}
         </div>
       )}
       {gpsStatus === 'error' && (
         <div style={{ background: '#FEF2F2', padding: '0.5rem 1rem', fontSize: '0.82rem', color: '#B91C1C', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <Info size={15} />
-          {lang === 'hi' ? 'GPS नहीं मिला। कृपया नीचे दिए नक्शे पर छुएं।' : lang === 'es' ? 'GPS no disponible. Toca el mapa para fijar.' : 'GPS unavailable. Tap anywhere on the city map below.'}
+          {lang === 'hi' ? 'GPS नहीं मिला। कृपया नीचे नक्शे पर छूएं।' : 'GPS unavailable — allow location permission or tap the map below.'}
         </div>
       )}
 
-      {/* SVG City Map with Big Touch Target */}
-      <div onClick={handleClick} style={{ cursor: 'crosshair', position: 'relative', background: '#F1F5F9' }}>
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', display: 'block' }}>
-          {/* Water */}
-          <path d="M0,0 L600,0 L600,65 C450,60,360,80,240,65 C120,50,60,85,0,75Z" fill="#DBEAFE" stroke="#BFDBFE" strokeWidth="1" />
-          <text x="310" y="40" fill="#1D4ED8" fontSize="12" fontWeight="800" opacity="0.6">🌊 MARINA BAY</text>
-
-          {/* Parks */}
-          <rect x="42" y="150" width="135" height="85" rx="10" fill="#DCFCE7" stroke="#BBF7D0" strokeWidth="1" />
-          <text x="65" y="195" fill="#15803D" fontSize="11" fontWeight="800" opacity="0.7">🌳 PARK HEIGHTS</text>
-
-          {/* Grid roads */}
-          <g stroke="#E2E8F0" strokeWidth="4">
-            {[110, 175, 245, 305].map(y => <line key={y} x1="0" y1={y} x2={W} y2={y} />)}
-            {[110, 215, 335, 455].map(x => <line key={x} x1={x} y1="0" x2={x} y2={H} />)}
-          </g>
-
-          {/* Highway */}
-          <path d="M0,280 Q280,235,600,285" fill="none" stroke="#CBD5E1" strokeWidth="6" strokeDasharray="10,5" />
-          <text x="250" y="265" fill="#64748B" fontSize="10" fontWeight="700">🛣️ METRO EXPRESSWAY</text>
-
-          {/* Active Big Pin */}
-          <g transform={`translate(${cx},${cy})`}>
-            <circle r="26" fill="#2563EB" opacity="0.2" className="pulse-badge" />
-            <circle r="14" fill="#2563EB" opacity="0.35" />
-            <path d="M0,0 C-10,-15,-10,-30,0,-30 C10,-30,10,-15,0,0Z" fill="#DC2626" stroke="#fff" strokeWidth="3" filter="drop-shadow(0 4px 6px rgba(0,0,0,0.3))" />
-            <circle cy="-20" r="5" fill="#fff" />
-          </g>
-        </svg>
-
-        {/* Floating Tap instruction & Google Maps Link */}
-        <div style={{
-          position: 'absolute', top: '10px', right: '10px',
-          background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(4px)',
-          borderRadius: '8px', padding: '0.3rem 0.7rem', fontSize: '0.75rem',
-          fontWeight: 700, color: '#374151', border: '1px solid #E5E7EB',
-          display: 'flex', alignItems: 'center', gap: '0.4rem',
-        }}>
-          👆 {lang === 'hi' ? 'नक्शे पर छूकर जगह बदलें' : lang === 'es' ? 'Toca para mover el pin' : 'Tap anywhere to drop pin'}
+      {/* Map Area */}
+      {noKeyFallback ? (
+        <div style={{ background: '#F1F5F9', height: '280px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', padding: '1.5rem', textAlign: 'center' }}>
+          <MapPin size={36} color="#DC2626" />
+          <p style={{ fontWeight: 700, color: '#374151' }}>Add Google Maps API Key</p>
+          <p style={{ fontSize: '0.8rem', color: '#6B7280', lineHeight: 1.5 }}>
+            Create <code>frontend/.env</code> with:<br />
+            <code style={{ background: '#E2E8F0', padding: '0.15rem 0.4rem', borderRadius: '4px' }}>VITE_GOOGLE_MAPS_API_KEY=your_key</code>
+          </p>
+          {lat && lng && (
+            <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+              style={{ color: '#2563EB', fontWeight: 700, fontSize: '0.85rem' }}>
+              📍 View captured location on Google Maps ↗
+            </a>
+          )}
         </div>
+      ) : !isLoaded ? (
+        <div style={{ height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC' }}>
+          <div style={{ textAlign: 'center', color: '#6B7280', fontSize: '0.85rem' }}>
+            <div style={{ width: '28px', height: '28px', border: '3px solid #E5E7EB', borderTop: '3px solid #2563EB', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 0.6rem' }} />
+            Loading map…
+          </div>
+        </div>
+      ) : (
+        <GoogleMap
+          mapContainerStyle={{ width: '100%', height: '280px' }}
+          center={center}
+          zoom={lat && lng ? 15 : 12}
+          onClick={handleMapClick}
+          onLoad={(m) => { mapRef.current = m; }}
+          options={{
+            streetViewControl: false, mapTypeControl: false,
+            fullscreenControl: false, zoomControl: true,
+            gestureHandling: 'cooperative',
+          }}
+        >
+          {lat && lng && (
+            <Marker
+              position={{ lat, lng }}
+              draggable
+              onDragEnd={handleMarkerDrag}
+            />
+          )}
+        </GoogleMap>
+      )}
 
-        <div style={{
-          position: 'absolute', bottom: '10px', left: '10px',
-          background: 'rgba(255,255,255,0.94)', borderRadius: '8px',
-          padding: '0.35rem 0.75rem', fontSize: '0.75rem', fontWeight: 600,
-          display: 'flex', alignItems: 'center', gap: '0.75rem', border: '1px solid #E5E7EB',
-        }}>
-          <span>📍 <strong>{wardName}</strong></span>
+      {/* Address bar */}
+      <div style={{ padding: '0.5rem 1rem', background: '#F8FAFC', borderTop: '1px solid #E5E7EB', fontSize: '0.78rem', color: '#374151', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <span>
+          <MapPin size={12} color="#DC2626" style={{ display: 'inline', marginRight: '4px' }} />
+          {address || wardName || (lat && lng ? `${lat.toFixed(5)}°N, ${lng.toFixed(5)}°E` : 'Pin not placed')}
+        </span>
+        {lat && lng && (
           <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
-            style={{ color: '#2563EB', display: 'flex', alignItems: 'center', gap: '0.2rem', textDecoration: 'none', fontWeight: 700 }}>
-            <ExternalLink size={12} /> Google Maps
+            style={{ color: '#2563EB', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+            <ExternalLink size={11} /> Google Maps
           </a>
-        </div>
+        )}
       </div>
     </div>
   );
 }
 
 /* ── YOLO Defect Scanner Component ──────────────────────── */
+
 function YoloBox({ onDone, currentIssueType, onSelectPreset, lang = 'en', t }) {
   const [preview, setPreview] = useState(null);
   const [annotated, setAnnotated] = useState(null);
@@ -554,8 +576,8 @@ export default function CitizenView({ onReportSubmitted }) {
   const [viewMode, setViewMode] = useState('easy'); // 'easy' | 'full'
   const [issueType, setIssueType] = useState('pothole');
   const [description, setDescription] = useState('');
-  const [lat, setLat] = useState(37.7842);
-  const [lng, setLng] = useState(-122.4071);
+  const [lat, setLat] = useState(28.6139);  // New Delhi default
+  const [lng, setLng] = useState(77.2090);
   const [addressHint, setAddressHint] = useState('Downtown Central, 5th & Market St');
   const [wardName, setWardName] = useState('Downtown Central');
   const [yoloResult, setYoloResult] = useState(null);
@@ -585,7 +607,14 @@ export default function CitizenView({ onReportSubmitted }) {
   const handleLocation = (newLat, newLng) => {
     setLat(newLat);
     setLng(newLng);
-    setWardName(newLat > 37.795 ? 'Harbor & Marina' : newLng < -122.43 ? 'Park Heights' : newLat < 37.76 ? 'Industrial Hub' : 'Downtown Central');
+    // Ward classification based on Indian geographic zones
+    const wardLabel = newLat > 28.5 && newLng > 76.5 && newLng < 78.5 ? 'Delhi NCR Zone' :
+      newLat > 18.8 && newLat < 19.3 && newLng > 72.7 && newLng < 73.1 ? 'Mumbai District' :
+      newLat > 12.8 && newLat < 13.1 && newLng > 77.4 && newLng < 77.8 ? 'Bengaluru Zone' :
+      newLat > 22.4 && newLat < 22.7 && newLng > 88.2 && newLng < 88.5 ? 'Kolkata District' :
+      newLat > 17.3 && newLat < 17.5 && newLng > 78.3 && newLng < 78.6 ? 'Hyderabad Zone' :
+      `Zone ${newLat.toFixed(1)}°N`;
+    setWardName(wardLabel);
   };
 
   // Toggle voice guide narration
