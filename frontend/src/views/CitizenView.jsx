@@ -236,28 +236,70 @@ const SAMPLE_PRESETS = [
   },
 ];
 
-/* ── Interactive Map Component with Big Visuals ─────────── */
+/* ── Interactive Map Component with Big Visuals & Live Map Fallback ── */
+const INDIAN_CITY_PRESETS = [
+  { name: 'Delhi NCR', lat: 28.6139, lng: 77.2090, ward: 'Delhi NCR Zone' },
+  { name: 'Mumbai', lat: 19.0760, lng: 72.8777, ward: 'Mumbai District' },
+  { name: 'Bengaluru', lat: 12.9716, lng: 77.5946, ward: 'Bengaluru Zone' },
+  { name: 'Hyderabad', lat: 17.3850, lng: 78.4867, ward: 'Hyderabad Zone' },
+  { name: 'Kolkata', lat: 22.5726, lng: 88.3639, ward: 'Kolkata District' },
+  { name: 'Chennai', lat: 13.0827, lng: 80.2707, ward: 'Chennai Zone' },
+  { name: 'Pune', lat: 18.5204, lng: 73.8567, ward: 'Pune District' },
+];
+
 function MiniMap({ lat, lng, wardName, onChangeLocation, lang = 'en', onGpsSuccess }) {
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsStatus, setGpsStatus]   = useState(null); // 'ok' | 'error' | null
   const [address, setAddress]       = useState('');
+  const [mapTheme, setMapTheme]     = useState('dark'); // 'dark' | 'light'
   const mapRef = useRef(null);
 
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const hasValidKey = apiKey && apiKey !== 'YOUR_API_KEY_HERE';
+
   const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: apiKey || '',
+    googleMapsApiKey: hasValidKey ? apiKey : '',
     libraries: ['places'],
   });
 
-  const center = (lat && lng) ? { lat, lng } : { lat: 28.6139, lng: 77.2090 };
-  const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+  const centerLat = lat || 28.6139;
+  const centerLng = lng || 77.2090;
+  const mapsUrl = `https://www.google.com/maps?q=${centerLat},${centerLng}`;
 
-  // Reverse geocode to get address string
-  const reverseGeocode = (lt, ln) => {
-    if (!window.google) return;
-    new window.google.maps.Geocoder().geocode({ location: { lat: lt, lng: ln } }, (results, status) => {
-      if (status === 'OK' && results[0]) setAddress(results[0].formatted_address);
-    });
+  // Reverse geocode fallback with OpenStreetMap Nominatim
+  const reverseGeocode = async (lt, ln) => {
+    if (window.google?.maps?.Geocoder) {
+      new window.google.maps.Geocoder().geocode({ location: { lat: lt, lng: ln } }, (results, status) => {
+        if (status === 'OK' && results[0]) setAddress(results[0].formatted_address);
+      });
+      return;
+    }
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lt}&lon=${ln}`, {
+        headers: { 'Accept-Language': lang === 'hi' ? 'hi,en' : 'en' },
+      });
+      const data = await res.json();
+      if (data && data.display_name) {
+        setAddress(data.display_name);
+      }
+    } catch {
+      // offline / blocked - silent fallback
+    }
+  };
+
+  const handleSelectCity = (preset) => {
+    playSound('select');
+    onChangeLocation?.(preset.lat, preset.lng);
+    reverseGeocode(preset.lat, preset.lng);
+    setGpsStatus(null);
+  };
+
+  const handleNudge = (dLat, dLng) => {
+    playSound('click');
+    const newLat = +(centerLat + dLat).toFixed(6);
+    const newLng = +(centerLng + dLng).toFixed(6);
+    onChangeLocation?.(newLat, newLng);
+    reverseGeocode(newLat, newLng);
   };
 
   const handleMapClick = (e) => {
@@ -291,9 +333,10 @@ function MiniMap({ lat, lng, wardName, onChangeLocation, lang = 'en', onGpsSucce
         playSound('success');
         onGpsSuccess?.();
         if (mapRef.current) { mapRef.current.panTo({ lat: lt, lng: ln }); mapRef.current.setZoom(16); }
-        setTimeout(() => setGpsStatus(null), 4000);
+        setTimeout(() => setGpsStatus(null), 5000);
       },
       (err) => {
+        console.warn('Geolocation error:', err);
         setGpsLoading(false);
         setGpsStatus('error');
       },
@@ -301,12 +344,24 @@ function MiniMap({ lat, lng, wardName, onChangeLocation, lang = 'en', onGpsSucce
     );
   };
 
-  const noKeyFallback = !apiKey || apiKey === 'YOUR_API_KEY_HERE';
+  const osmDelta = 0.009;
+  const osmUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${(centerLng - osmDelta).toFixed(5)}%2C${(centerLat - osmDelta).toFixed(5)}%2C${(centerLng + osmDelta).toFixed(5)}%2C${(centerLat + osmDelta).toFixed(5)}&layer=mapnik&marker=${centerLat.toFixed(5)}%2C${centerLng.toFixed(5)}`;
 
   return (
-    <div style={{ border: '2px solid #E5E7EB', borderRadius: '16px', overflow: 'hidden', background: '#fff', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}>
-      {/* GPS Button */}
-      <div style={{ padding: '0.85rem 1rem', background: '#F0FDF4', borderBottom: '1.5px solid #BBF7D0' }}>
+    <div style={{
+      border: '1.5px solid rgba(255,255,255,0.12)',
+      borderRadius: '18px',
+      overflow: 'hidden',
+      background: 'rgba(15, 23, 42, 0.85)',
+      backdropFilter: 'blur(16px)',
+      boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
+    }}>
+      {/* GPS Button Bar */}
+      <div style={{
+        padding: '0.85rem 1rem',
+        background: 'linear-gradient(180deg, rgba(22,163,74,0.15) 0%, rgba(22,163,74,0.05) 100%)',
+        borderBottom: '1px solid rgba(34,197,94,0.25)',
+      }}>
         <button
           type="button"
           onClick={handleGps}
@@ -314,93 +369,302 @@ function MiniMap({ lat, lng, wardName, onChangeLocation, lang = 'en', onGpsSucce
           className="pulsing-gps"
           style={{
             width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            gap: '0.6rem', padding: '0.8rem 1.25rem',
-            background: gpsStatus === 'ok' ? '#16A34A' : '#16A34A',
-            color: '#FFFFFF', borderRadius: '12px', fontSize: '0.95rem',
-            fontWeight: 800, boxShadow: '0 3px 10px rgba(22,163,74,0.3)', cursor: 'pointer',
+            gap: '0.65rem', padding: '0.85rem 1.25rem',
+            background: 'linear-gradient(135deg, #16A34A 0%, #15803D 100%)',
+            color: '#FFFFFF', borderRadius: '14px', fontSize: '0.98rem',
+            fontWeight: 800, border: 'none',
+            boxShadow: '0 4px 18px rgba(22,163,74,0.4)', cursor: 'pointer',
+            transition: 'all 0.2s ease',
           }}
         >
-          <Navigation size={18} className={gpsLoading ? 'animate-spin' : ''} />
+          <Navigation size={19} className={gpsLoading ? 'animate-spin' : ''} />
           {gpsLoading
-            ? (lang === 'hi' ? 'स्थान खोज रहे हैं…' : 'Detecting GPS Location…')
+            ? (lang === 'hi' ? 'स्थान खोज रहे हैं…' : 'Detecting Live GPS Location…')
             : gpsStatus === 'ok'
             ? '✅ Location Locked!'
-            : (lang === 'hi' ? '📍 मेरा स्थान अपने आप खोजें (GPS)' : '📍 Detect My Current Location (1-Tap GPS)')}
+            : (lang === 'hi' ? '📍 मेरा स्थान अपने आप खोजें (1-Tap GPS)' : '📍 Detect My Current Location (1-Tap GPS)')}
         </button>
       </div>
 
-      {/* GPS Status */}
+      {/* GPS Status Banner */}
       {gpsStatus === 'ok' && (
-        <div style={{ background: '#DCFCE7', padding: '0.5rem 1rem', fontSize: '0.85rem', color: '#14532D', fontWeight: 700, display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <CheckCircle2 size={16} color="#16A34A" />
-          {lang === 'hi' ? 'स्थान सफलतापूर्वक लॉक हो गया!' : 'GPS location locked! You can also drag the pin to adjust.'}
+        <div style={{
+          background: 'rgba(22, 163, 74, 0.2)',
+          borderBottom: '1px solid rgba(34, 197, 94, 0.3)',
+          padding: '0.6rem 1rem', fontSize: '0.85rem', color: '#4ADE80',
+          fontWeight: 700, display: 'flex', gap: '0.5rem', alignItems: 'center',
+        }}>
+          <CheckCircle2 size={16} color="#4ADE80" />
+          {lang === 'hi'
+            ? `स्थान लॉक: ${centerLat.toFixed(5)}°N, ${centerLng.toFixed(5)}°E`
+            : `GPS locked: ${centerLat.toFixed(5)}°N, ${centerLng.toFixed(5)}°E (${wardName || 'Verified Zone'})`}
         </div>
       )}
       {gpsStatus === 'error' && (
-        <div style={{ background: '#FEF2F2', padding: '0.5rem 1rem', fontSize: '0.82rem', color: '#B91C1C', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.15)',
+          borderBottom: '1px solid rgba(239, 68, 68, 0.3)',
+          padding: '0.6rem 1rem', fontSize: '0.82rem', color: '#F87171',
+          display: 'flex', gap: '0.5rem', alignItems: 'center',
+        }}>
           <Info size={15} />
-          {lang === 'hi' ? 'GPS नहीं मिला। कृपया नीचे नक्शे पर छूएं।' : 'GPS unavailable — allow location permission or tap the map below.'}
+          {lang === 'hi' ? 'GPS अनुमति नहीं मिली — नीचे शहर चुनें।' : 'GPS permission unavailable — select a city below or view in Google Maps.'}
         </div>
       )}
 
+      {/* Map Header Bar */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '0.55rem 0.95rem',
+        background: 'rgba(2, 6, 23, 0.7)',
+        borderBottom: '1px solid rgba(255,255,255,0.08)',
+        fontSize: '0.78rem',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', color: '#94A3B8' }}>
+          <span style={{
+            display: 'inline-block', width: '8px', height: '8px',
+            borderRadius: '50%', background: '#22C55E',
+            boxShadow: '0 0 8px #22C55E',
+          }} />
+          <strong style={{ color: '#F1F5F9' }}>Live Map & GPS Grid</strong>
+          <span style={{ color: '#64748B' }}>({wardName || 'Delhi NCR Zone'})</span>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <button
+            type="button"
+            onClick={() => setMapTheme(m => m === 'dark' ? 'light' : 'dark')}
+            title="Toggle Map Style"
+            style={{
+              background: 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              borderRadius: '6px',
+              color: '#CBD5E1',
+              padding: '0.2rem 0.55rem',
+              fontSize: '0.72rem',
+              cursor: 'pointer',
+            }}
+          >
+            {mapTheme === 'dark' ? '🌙 Dark Mode' : '☀️ Light Mode'}
+          </button>
+          <a
+            href={mapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.25rem',
+              color: '#38BDF8', fontWeight: 700, fontSize: '0.75rem',
+              textDecoration: 'none',
+              background: 'rgba(56, 189, 248, 0.12)',
+              border: '1px solid rgba(56, 189, 248, 0.25)',
+              padding: '0.2rem 0.55rem', borderRadius: '6px',
+            }}
+          >
+            <ExternalLink size={11} /> Google Maps ↗
+          </a>
+        </div>
+      </div>
+
       {/* Map Area */}
-      {noKeyFallback ? (
-        <div style={{ background: '#F1F5F9', height: '280px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', padding: '1.5rem', textAlign: 'center' }}>
-          <MapPin size={36} color="#DC2626" />
-          <p style={{ fontWeight: 700, color: '#374151' }}>Add Google Maps API Key</p>
-          <p style={{ fontSize: '0.8rem', color: '#6B7280', lineHeight: 1.5 }}>
-            Create <code>frontend/.env</code> with:<br />
-            <code style={{ background: '#E2E8F0', padding: '0.15rem 0.4rem', borderRadius: '4px' }}>VITE_GOOGLE_MAPS_API_KEY=your_key</code>
-          </p>
-          {lat && lng && (
-            <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
-              style={{ color: '#2563EB', fontWeight: 700, fontSize: '0.85rem' }}>
-              📍 View captured location on Google Maps ↗
-            </a>
-          )}
-        </div>
-      ) : !isLoaded ? (
-        <div style={{ height: '280px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#F8FAFC' }}>
-          <div style={{ textAlign: 'center', color: '#6B7280', fontSize: '0.85rem' }}>
-            <div style={{ width: '28px', height: '28px', border: '3px solid #E5E7EB', borderTop: '3px solid #2563EB', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 0.6rem' }} />
-            Loading map…
-          </div>
-        </div>
-      ) : (
-        <GoogleMap
-          mapContainerStyle={{ width: '100%', height: '280px' }}
-          center={center}
-          zoom={lat && lng ? 15 : 12}
-          onClick={handleMapClick}
-          onLoad={(m) => { mapRef.current = m; }}
-          options={{
-            streetViewControl: false, mapTypeControl: false,
-            fullscreenControl: false, zoomControl: true,
-            gestureHandling: 'cooperative',
-          }}
-        >
-          {lat && lng && (
+      <div style={{ position: 'relative', width: '100%', height: '300px', background: '#0B0F19' }}>
+        {hasValidKey && isLoaded ? (
+          <GoogleMap
+            mapContainerStyle={{ width: '100%', height: '100%' }}
+            center={{ lat: centerLat, lng: centerLng }}
+            zoom={15}
+            onClick={handleMapClick}
+            onLoad={(m) => { mapRef.current = m; }}
+            options={{
+              streetViewControl: false, mapTypeControl: false,
+              fullscreenControl: false, zoomControl: true,
+              gestureHandling: 'cooperative',
+            }}
+          >
             <Marker
-              position={{ lat, lng }}
+              position={{ lat: centerLat, lng: centerLng }}
               draggable
               onDragEnd={handleMarkerDrag}
             />
-          )}
-        </GoogleMap>
-      )}
+          </GoogleMap>
+        ) : (
+          <>
+            <iframe
+              title="Civic Location Map"
+              src={osmUrl}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                filter: mapTheme === 'dark'
+                  ? 'invert(0.92) hue-rotate(180deg) brightness(0.95) contrast(1.1)'
+                  : 'none',
+                transition: 'filter 0.3s ease',
+              }}
+            />
 
-      {/* Address bar */}
-      <div style={{ padding: '0.5rem 1rem', background: '#F8FAFC', borderTop: '1px solid #E5E7EB', fontSize: '0.78rem', color: '#374151', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
-        <span>
-          <MapPin size={12} color="#DC2626" style={{ display: 'inline', marginRight: '4px' }} />
-          {address || wardName || (lat && lng ? `${lat.toFixed(5)}°N, ${lng.toFixed(5)}°E` : 'Pin not placed')}
-        </span>
-        {lat && lng && (
-          <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
-            style={{ color: '#2563EB', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
-            <ExternalLink size={11} /> Google Maps
-          </a>
+            {/* Pin Badge Floating Overlay */}
+            <div style={{
+              position: 'absolute',
+              bottom: '12px',
+              left: '12px',
+              background: 'rgba(15, 23, 42, 0.88)',
+              backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              padding: '0.4rem 0.75rem',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              color: '#F8FAFC',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+              pointerEvents: 'none',
+            }}>
+              <MapPin size={13} color="#EF4444" />
+              <span>{centerLat.toFixed(5)}°N, {centerLng.toFixed(5)}°E</span>
+            </div>
+          </>
         )}
+      </div>
+
+      {/* Quick City Hotspots & Nudge Controls */}
+      <div style={{
+        padding: '0.65rem 0.95rem',
+        background: 'rgba(15, 23, 42, 0.95)',
+        borderTop: '1px solid rgba(255,255,255,0.08)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.5rem',
+      }}>
+        {/* City Chips */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.74rem', color: '#94A3B8', fontWeight: 700 }}>
+            {lang === 'hi' ? 'त्वरित शहर:' : 'Quick Zone:'}
+          </span>
+          {INDIAN_CITY_PRESETS.map(p => {
+            const isSelected = Math.abs(centerLat - p.lat) < 0.05 && Math.abs(centerLng - p.lng) < 0.05;
+            return (
+              <button
+                key={p.name}
+                type="button"
+                onClick={() => handleSelectCity(p)}
+                style={{
+                  background: isSelected ? 'rgba(37, 99, 235, 0.35)' : 'rgba(255,255,255,0.05)',
+                  border: isSelected ? '1px solid #3B82F6' : '1px solid rgba(255,255,255,0.1)',
+                  color: isSelected ? '#93C5FD' : '#CBD5E1',
+                  borderRadius: '20px',
+                  padding: '0.2rem 0.65rem',
+                  fontSize: '0.74rem',
+                  fontWeight: isSelected ? 800 : 500,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                📍 {p.name}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Pin Nudge Bar */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '0.5rem',
+          paddingTop: '0.25rem',
+          borderTop: '1px solid rgba(255,255,255,0.05)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.72rem', color: '#94A3B8' }}>
+            <span>{lang === 'hi' ? 'पिन थोड़ा बदलें:' : 'Fine-Tune Pin:'}</span>
+            <button
+              type="button"
+              onClick={() => handleNudge(0.0015, 0)}
+              title="Nudge North"
+              style={{
+                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
+                color: '#fff', borderRadius: '4px', padding: '0.15rem 0.45rem', fontSize: '0.7rem', cursor: 'pointer',
+              }}
+            >
+              ▲ N
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNudge(-0.0015, 0)}
+              title="Nudge South"
+              style={{
+                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
+                color: '#fff', borderRadius: '4px', padding: '0.15rem 0.45rem', fontSize: '0.7rem', cursor: 'pointer',
+              }}
+            >
+              ▼ S
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNudge(0, -0.0015)}
+              title="Nudge West"
+              style={{
+                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
+                color: '#fff', borderRadius: '4px', padding: '0.15rem 0.45rem', fontSize: '0.7rem', cursor: 'pointer',
+              }}
+            >
+              ◄ W
+            </button>
+            <button
+              type="button"
+              onClick={() => handleNudge(0, 0.0015)}
+              title="Nudge East"
+              style={{
+                background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
+                color: '#fff', borderRadius: '4px', padding: '0.15rem 0.45rem', fontSize: '0.7rem', cursor: 'pointer',
+              }}
+            >
+              ► E
+            </button>
+          </div>
+
+          <div style={{ fontSize: '0.74rem', color: '#64748B' }}>
+            🛰️ OSM & Google Maps Geocoded
+          </div>
+        </div>
+      </div>
+
+      {/* Address Bar Footer */}
+      <div style={{
+        padding: '0.55rem 0.95rem',
+        background: 'rgba(2, 6, 23, 0.9)',
+        borderTop: '1px solid rgba(255,255,255,0.08)',
+        fontSize: '0.78rem',
+        color: '#E2E8F0',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '0.5rem',
+        flexWrap: 'wrap',
+      }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+          <MapPin size={13} color="#EF4444" />
+          <span style={{ color: '#F1F5F9', fontWeight: 600 }}>
+            {address || wardName || `${centerLat.toFixed(5)}°N, ${centerLng.toFixed(5)}°E`}
+          </span>
+        </span>
+        <a
+          href={mapsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            color: '#60A5FA',
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.25rem',
+            textDecoration: 'none',
+          }}
+        >
+          <ExternalLink size={11} /> Google Maps
+        </a>
       </div>
     </div>
   );
@@ -788,14 +1052,14 @@ export default function CitizenView({ onReportSubmitted }) {
       {/* ── Accessible Toolbar: Language Selector + Mode Switch + Voice Guide ── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: '#F8FAFC', border: '1.5px solid #E2E8F0', borderRadius: '16px',
+        background: 'rgba(13, 29, 49, 0.75)', border: '1px solid rgba(56, 189, 248, 0.16)', borderRadius: '16px',
         padding: '0.75rem 1.25rem', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.03)'
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)', backdropFilter: 'blur(16px)'
       }}>
         {/* Language selector buttons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Globe size={16} color="#64748B" />
-          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569' }}>Language:</span>
+          <Globe size={16} color="#38BDF8" />
+          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#94A3B8' }}>Language:</span>
           {[
             { code: 'en', label: '🇬🇧 English' },
             { code: 'hi', label: '🇮🇳 हिंदी' },
@@ -810,10 +1074,11 @@ export default function CitizenView({ onReportSubmitted }) {
                 borderRadius: '8px',
                 fontSize: '0.82rem',
                 fontWeight: lang === l.code ? 800 : 600,
-                background: lang === l.code ? '#2563EB' : '#FFFFFF',
-                color: lang === l.code ? '#FFFFFF' : '#334155',
-                border: lang === l.code ? '1px solid #2563EB' : '1px solid #CBD5E1',
+                background: lang === l.code ? 'linear-gradient(135deg, #10B981, #0284C7)' : 'rgba(255,255,255,0.05)',
+                color: lang === l.code ? '#FFFFFF' : '#94A3B8',
+                border: lang === l.code ? '1px solid #10B981' : '1px solid rgba(56, 189, 248, 0.15)',
                 cursor: 'pointer',
+                boxShadow: lang === l.code ? '0 2px 8px rgba(16, 185, 129, 0.3)' : 'none',
               }}
             >
               {l.label}
@@ -829,9 +1094,9 @@ export default function CitizenView({ onReportSubmitted }) {
             style={{
               display: 'flex', alignItems: 'center', gap: '0.45rem',
               padding: '0.45rem 0.95rem', borderRadius: '10px',
-              background: isSpeakingGuide ? '#DC2626' : '#EFF6FF',
-              color: isSpeakingGuide ? '#FFFFFF' : '#1D4ED8',
-              border: isSpeakingGuide ? '1.5px solid #DC2626' : '1.5px solid #BFDBFE',
+              background: isSpeakingGuide ? 'rgba(239, 68, 68, 0.2)' : 'rgba(14, 165, 233, 0.12)',
+              color: isSpeakingGuide ? '#FCA5A5' : '#38BDF8',
+              border: isSpeakingGuide ? '1.5px solid #EF4444' : '1.5px solid rgba(56, 189, 248, 0.3)',
               fontSize: '0.84rem', fontWeight: 800, cursor: 'pointer',
             }}
           >
@@ -840,15 +1105,15 @@ export default function CitizenView({ onReportSubmitted }) {
           </button>
 
           {/* Mode Switcher */}
-          <div style={{ display: 'flex', background: '#E2E8F0', borderRadius: '10px', padding: '3px' }}>
+          <div style={{ display: 'flex', background: 'rgba(11, 24, 40, 0.8)', borderRadius: '10px', padding: '3px', border: '1px solid rgba(56, 189, 248, 0.15)' }}>
             <button
               type="button"
               onClick={() => { playSound('click'); setViewMode('easy'); }}
               style={{
                 padding: '0.35rem 0.8rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700,
-                background: viewMode === 'easy' ? '#FFFFFF' : 'transparent',
-                color: viewMode === 'easy' ? '#1E293B' : '#64748B',
-                boxShadow: viewMode === 'easy' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                background: viewMode === 'easy' ? 'linear-gradient(135deg, #10B981, #0284C7)' : 'transparent',
+                color: viewMode === 'easy' ? '#FFFFFF' : '#94A3B8',
+                boxShadow: viewMode === 'easy' ? '0 2px 8px rgba(16, 185, 129, 0.3)' : 'none',
               }}
             >
               {t.modeEasy}
@@ -858,9 +1123,9 @@ export default function CitizenView({ onReportSubmitted }) {
               onClick={() => { playSound('click'); setViewMode('full'); }}
               style={{
                 padding: '0.35rem 0.8rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 700,
-                background: viewMode === 'full' ? '#FFFFFF' : 'transparent',
-                color: viewMode === 'full' ? '#1E293B' : '#64748B',
-                boxShadow: viewMode === 'full' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                background: viewMode === 'full' ? 'linear-gradient(135deg, #10B981, #0284C7)' : 'transparent',
+                color: viewMode === 'full' ? '#FFFFFF' : '#94A3B8',
+                boxShadow: viewMode === 'full' ? '0 2px 8px rgba(16, 185, 129, 0.3)' : 'none',
               }}
             >
               {t.modeFull}
@@ -890,7 +1155,7 @@ export default function CitizenView({ onReportSubmitted }) {
           {/* ── STEP 1: Giant Pictorial Issue Cards ── */}
           <div className="card" style={{ padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#111827', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-main, #F1F5F9)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 {t.step1}
               </div>
               <span style={{ fontSize: '0.78rem', color: '#64748B', fontWeight: 600 }}>
@@ -913,8 +1178,9 @@ export default function CitizenView({ onReportSubmitted }) {
                     onClick={() => handleIssueSelect(opt)}
                     className={`pictorial-card ${active ? 'active' : ''}`}
                     style={{
-                      borderColor: active ? opt.color : '#E5E7EB',
-                      background: active ? opt.bg : '#FFFFFF',
+                      borderColor: active ? opt.color : 'rgba(56, 189, 248, 0.16)',
+                      background: active ? opt.bg : 'rgba(11, 24, 40, 0.75)',
+                      boxShadow: active ? `0 8px 25px ${opt.color}40` : 'none',
                     }}
                   >
                     {/* Active checkmark badge */}
@@ -924,7 +1190,7 @@ export default function CitizenView({ onReportSubmitted }) {
                         background: opt.color, color: '#fff',
                         width: '22px', height: '22px', borderRadius: '50%',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: '0 2px 6px rgba(0,0,0,0.15)'
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.25)'
                       }}>
                         <Check size={14} strokeWidth={3} />
                       </div>
@@ -942,11 +1208,11 @@ export default function CitizenView({ onReportSubmitted }) {
                       title="Hear name out loud"
                       style={{
                         position: 'absolute', top: '10px', left: '10px',
-                        background: 'rgba(255,255,255,0.85)',
-                        border: '1px solid #E2E8F0',
+                        background: 'rgba(13, 29, 49, 0.85)',
+                        border: '1px solid rgba(56, 189, 248, 0.2)',
                         borderRadius: '6px',
                         padding: '0.2rem 0.35rem',
-                        color: '#64748B',
+                        color: '#38BDF8',
                         cursor: 'pointer',
                         display: 'flex', alignItems: 'center'
                       }}
@@ -959,10 +1225,10 @@ export default function CitizenView({ onReportSubmitted }) {
                       {opt.emoji}
                     </div>
 
-                    <div style={{ fontSize: '0.95rem', fontWeight: 800, color: active ? '#111827' : '#334155' }}>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 800, color: active ? '#F8FAFC' : '#CBD5E1' }}>
                       {label}
                     </div>
-                    <div style={{ fontSize: '0.74rem', color: '#64748B', marginTop: '2px', lineHeight: 1.3 }}>
+                    <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginTop: '2px', lineHeight: 1.3 }}>
                       {sub}
                     </div>
                   </div>
@@ -973,7 +1239,7 @@ export default function CitizenView({ onReportSubmitted }) {
 
           {/* ── STEP 2: Photo & AI Scanner ── */}
           <div className="card" style={{ padding: '1.5rem' }}>
-            <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#111827', marginBottom: '0.85rem' }}>
+            <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-main, #F1F5F9)', marginBottom: '0.85rem' }}>
               {t.step2}
             </div>
             <YoloBox
@@ -995,7 +1261,7 @@ export default function CitizenView({ onReportSubmitted }) {
 
           {/* ── STEP 3: One-Tap Location (GPS & Map) ── */}
           <div className="card" style={{ padding: '1.5rem' }}>
-            <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#111827', marginBottom: '0.85rem' }}>
+            <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-main, #F1F5F9)', marginBottom: '0.85rem' }}>
               {t.step3}
             </div>
             <MiniMap
@@ -1023,7 +1289,7 @@ export default function CitizenView({ onReportSubmitted }) {
           {/* ── STEP 4: Speak Your Problem (Microphone & Quick Tags) ── */}
           <div className="card" style={{ padding: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#111827' }}>
+              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-main, #F1F5F9)' }}>
                 {t.step4}
               </div>
               <span style={{ fontSize: '0.78rem', color: '#16A34A', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>

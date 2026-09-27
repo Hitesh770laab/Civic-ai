@@ -189,12 +189,8 @@ export default function CivicIntroAnimation({ onComplete }) {
           >
             <span style={{ color: '#FFFFFF' }}>Civic</span>
             <span
-              style={{
-                background: 'linear-gradient(135deg, #60A5FA 0%, #A78BFA 50%, #34D399 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                marginLeft: '2px',
-              }}
+              className="text-gradient-brand"
+              style={{ marginLeft: '2px' }}
             >
               AI
             </span>

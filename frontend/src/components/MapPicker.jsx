@@ -103,43 +103,120 @@ export default function MapPicker({
 
   const googleMapsUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
 
-  // No API key configured
+  // No API key — use OpenStreetMap embed instead
   if (!apiKey || apiKey === 'YOUR_API_KEY_HERE') {
+    const osmLat = latitude || DEFAULT_CENTER.lat;
+    const osmLng = longitude || DEFAULT_CENTER.lng;
+    const osmZoom = latitude && longitude ? 15 : 12;
+    const osmUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${osmLng - 0.015},${osmLat - 0.01},${osmLng + 0.015},${osmLat + 0.01}&layer=mapnik&marker=${osmLat},${osmLng}`;
+    const googleMapsViewUrl = `https://www.google.com/maps?q=${osmLat},${osmLng}`;
+
     return (
-      <div style={{ border: '1.5px solid var(--border-light)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-        {/* GPS button — works without map */}
+      <div style={{
+        border: '1.5px solid rgba(255,255,255,0.08)',
+        borderRadius: 'var(--radius-lg)',
+        overflow: 'hidden',
+        background: 'rgba(14, 18, 30, 0.6)',
+        backdropFilter: 'blur(12px)',
+      }}>
+        {/* GPS button */}
         <button
           onClick={handleUseGps}
           disabled={gpsLoading}
           style={{
             width: '100%', padding: '0.85rem', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', gap: '0.5rem', background: gpsSuccess ? '#16A34A' : '#2563EB',
+            justifyContent: 'center', gap: '0.5rem',
+            background: gpsSuccess
+              ? 'linear-gradient(135deg, #10B981, #059669)'
+              : 'linear-gradient(135deg, #0EA5E9, #2563EB)',
             color: '#fff', fontWeight: 700, fontSize: '0.95rem', border: 'none', cursor: 'pointer',
+            transition: 'all 0.2s ease',
           }}
         >
           <LocateFixed size={18} />
           {gpsLoading ? 'Detecting GPS…' : gpsSuccess ? '✅ Location Captured!' : '📍 Detect My Current Location (1-Tap GPS)'}
         </button>
 
-        <div style={{ background: '#FFF7ED', border: '1px solid #FDE68A', padding: '1.25rem', textAlign: 'center' }}>
-          <p style={{ fontWeight: 700, color: '#B45309', marginBottom: '0.5rem' }}>⚠️ Google Maps API Key Required</p>
-          <p style={{ fontSize: '0.85rem', color: '#78350F', lineHeight: 1.5 }}>
-            Add your key to <code style={{ background: '#FEF3C7', padding: '0.1rem 0.35rem', borderRadius: '4px' }}>frontend/.env</code>:<br />
-            <code style={{ fontSize: '0.8rem', color: '#92400E' }}>VITE_GOOGLE_MAPS_API_KEY=your_key_here</code>
-          </p>
+        {gpsSuccess && (
+          <div style={{
+            padding: '0.55rem 1rem',
+            background: 'rgba(16, 185, 129, 0.1)',
+            borderBottom: '1px solid rgba(16, 185, 129, 0.2)',
+            fontSize: '0.82rem', color: '#4ADE80',
+            display: 'flex', alignItems: 'center', gap: '0.4rem',
+          }}>
+            <Navigation size={13} /> GPS location locked! You can also drag the pin to adjust.
+          </div>
+        )}
+
+        {/* OpenStreetMap iframe */}
+        <div style={{ position: 'relative', width: '100%', height: '340px', background: '#0C1017' }}>
+          <iframe
+            src={osmUrl}
+            style={{
+              width: '100%',
+              height: '100%',
+              border: 'none',
+              filter: 'invert(0.92) hue-rotate(180deg) brightness(0.95) contrast(1.1)',
+            }}
+            title="Location Map"
+            loading="lazy"
+            allowFullScreen
+          />
+          {/* Pin overlay for better visibility */}
           {latitude && longitude && (
-            <p style={{ marginTop: '0.75rem', fontSize: '0.82rem', color: '#6B7280' }}>
-              📍 GPS Captured: <strong>{latitude}°N, {longitude}°E</strong>
-              {' · '}
-              <a href={googleMapsUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#2563EB' }}>
-                View on Google Maps ↗
-              </a>
-            </p>
+            <div style={{
+              position: 'absolute', top: '50%', left: '50%',
+              transform: 'translate(-50%, -100%)',
+              pointerEvents: 'none', zIndex: 2,
+              fontSize: '1.8rem',
+              filter: 'invert(0.92) hue-rotate(180deg)',
+              textShadow: '0 2px 8px rgba(0,0,0,0.5)',
+            }}>
+              📍
+            </div>
+          )}
+        </div>
+
+        {/* Bottom bar */}
+        <div style={{
+          padding: '0.65rem 1rem',
+          background: 'rgba(6, 8, 15, 0.8)',
+          borderTop: '1px solid rgba(255,255,255,0.05)',
+          fontSize: '0.8rem', color: '#CBD5E1',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          flexWrap: 'wrap', gap: '0.5rem',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <MapPin size={13} color="#EF4444" />
+            {latitude && longitude
+              ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem' }}>{latitude.toFixed(5)}°N, {longitude.toFixed(5)}°E</span>
+              : <span style={{ color: '#64748B' }}>Pin not placed yet</span>
+            }
+            {wardName && <span style={{ color: '#64748B' }}> · {wardName}</span>}
+          </div>
+          {latitude && longitude && (
+            <a
+              href={googleMapsViewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                color: '#38BDF8', fontWeight: 600, fontSize: '0.78rem',
+              }}
+            >
+              <ExternalLink size={12} /> Google Maps
+            </a>
           )}
         </div>
 
         {gpsError && (
-          <div style={{ padding: '0.75rem 1rem', background: '#FEF2F2', borderTop: '1px solid #FECACA', fontSize: '0.83rem', color: '#DC2626' }}>
+          <div style={{
+            padding: '0.75rem 1rem',
+            background: 'rgba(239, 68, 68, 0.1)',
+            borderTop: '1px solid rgba(239, 68, 68, 0.2)',
+            fontSize: '0.83rem', color: '#FCA5A5',
+          }}>
             ⚠️ {gpsError}
           </div>
         )}
